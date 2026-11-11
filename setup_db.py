@@ -1,27 +1,63 @@
-import os
+"""Crée la base SQLite locale à partir des fichiers CSV Olist placés dans data/."""
 import sqlite3
+import sys
+from pathlib import Path
+
 import pandas as pd
 
-# Connexion / création de la base de données locale
-conn = sqlite3.connect("olist_ecommerce.db")
-cursor = conn.cursor()
+RACINE = Path(__file__).resolve().parent
+DOSSIER_DATA = RACINE / "data"
+CHEMIN_DB = RACINE / "olist_ecommerce.db"
 
-# Chemins des fichiers CSV
-files = {
-    "orders": "data/olist_orders_dataset.csv",
-    "payments": "data/olist_order_payments_dataset.csv",
-    "customers": "data/olist_customers_dataset.csv",
+# Table SQLite -> fichier CSV source
+TABLES = {
+    "orders": "olist_orders_dataset.csv",
+    "payments": "olist_order_payments_dataset.csv",
+    "customers": "olist_customers_dataset.csv",
+    "order_items": "olist_order_items_dataset.csv",
+    "reviews": "olist_order_reviews_dataset.csv",
+    "products": "olist_products_dataset.csv",
+    "sellers": "olist_sellers_dataset.csv",
+    "category_translation": "product_category_name_translation.csv",
 }
 
-for table_name, file_path in files.items():
-    if os.path.exists(file_path):
-        print(f"Chargement de {table_name}...")
-        df = pd.read_csv(file_path)
-        # Insertion des données dans la base SQLite
-        df.to_sql(table_name, conn, if_exists="replace", index=False)
-        print(f"-> Table '{table_name}' chargée avec {len(df)} lignes.")
-    else:
-        print(f"Fichier non trouvé : {file_path}")
+# Index sur les clés de jointure utilisées par les requêtes
+INDEX = [
+    ("orders", "order_id"),
+    ("orders", "customer_id"),
+    ("payments", "order_id"),
+    ("customers", "customer_id"),
+    ("customers", "customer_unique_id"),
+    ("order_items", "order_id"),
+    ("order_items", "product_id"),
+    ("reviews", "order_id"),
+    ("products", "product_id"),
+]
 
-conn.close()
-print("Base de données créée avec succès dans 'olist_ecommerce.db' !")
+
+def main():
+    manquants = [f for f in TABLES.values() if not (DOSSIER_DATA / f).exists()]
+    if manquants:
+        print("Fichiers introuvables dans data/ :")
+        for fichier in manquants:
+            print(f"  - {fichier}")
+        print("Téléchargez le dataset Olist (voir README) et décompressez-le dans data/.")
+        sys.exit(1)
+
+    with sqlite3.connect(CHEMIN_DB) as conn:
+        for table, fichier in TABLES.items():
+            # utf-8-sig : le fichier de traduction des catégories commence par un BOM
+            df = pd.read_csv(DOSSIER_DATA / fichier, encoding="utf-8-sig")
+            df.to_sql(table, conn, if_exists="replace", index=False)
+            print(f"Table '{table}' chargée : {len(df):,} lignes".replace(",", " "))
+
+        for table, colonne in INDEX:
+            conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_{colonne} ON {table} ({colonne})"
+            )
+
+    print(f"Base de données créée : {CHEMIN_DB.name}")
+
+
+if __name__ == "__main__":
+    main()
